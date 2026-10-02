@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CDI Programmable Tuner</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            padding: 20px;
+            max-width: 480px;
+            margin: auto;
+        }
+        .header {
+            text-align: center;
+            padding: 15px 0;
+            border-bottom: 2px solid #00e676;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            font-size: 22px;
+            color: #00e676;
+            letter-spacing: 1px;
+        }
+        .card {
+            background-color: #1e1e1e;
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            border: 1px solid #2a2a2a;
+        }
+        .status-box {
+            text-align: center;
+            font-weight: bold;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        .connected {
+            background-color: rgba(27, 94, 32, 0.4);
+            color: #a5d6a7;
+            border: 1px solid #2e7d32;
+        }
+        .disconnected {
+            background-color: rgba(183, 28, 28, 0.4);
+            color: #ef9a9a;
+            border: 1px solid #c62828;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        .btn-connect {
+            background-color: #0288d1;
+            color: #ffffff;
+        }
+        .btn-connect:hover {
+            background-color: #0277bd;
+        }
+        .btn-send {
+            background-color: #00e676;
+            color: #121212;
+            margin-top: 15px;
+        }
+        .btn-send:hover {
+            background-color: #00c853;
+        }
+        .map-title {
+            font-size: 16px;
+            color: #81d4fa;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+        .row label {
+            width: 70px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #b0bec5;
+        }
+        input[type="number"] {
+            flex: 1;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            background-color: #2c2c2c;
+            color: #ffffff;
+            text-align: center;
+            font-size: 15px;
+            outline: none;
+        }
+        input[type="number"]:focus {
+            border-color: #00e676;
+        }
+        .unit-label {
+            display: flex;
+            justify-content: space-between;
+            padding: 0 5px 8px 75px;
+            font-size: 12px;
+            color: #78909c;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>CDI PROGRAMMABLE</h1>
+    </div>
+
+    <!-- KONEKSI BLUETOOTH -->
+    <div class="card">
+        <div id="status" class="status-box disconnected">Status: Terputus</div>
+        <button id="btnConnect" class="btn-connect" onclick="connectBluetooth()">HUBUNGKAN BLUETOOTH</button>
+    </div>
+
+    <!-- MAP PENGAPIAN -->
+    <div class="card">
+        <div class="map-title">SETTING KURVA PENGAPIAN</div>
+        
+        <div class="unit-label">
+            <span>RPM Mesin</span>
+            <span>Derajat (°BTDC)</span>
+        </div>
+
+        <!-- Titik 1 -->
+        <div class="row">
+            <label>Titik 1</label>
+            <input type="number" id="rpm1" value="2000" placeholder="2000">
+            <input type="number" id="deg1" value="15" placeholder="15">
+        </div>
+
+        <!-- Titik 2 -->
+        <div class="row">
+            <label>Titik 2</label>
+            <input type="number" id="rpm2" value="5000" placeholder="5000">
+            <input type="number" id="deg2" value="25" placeholder="25">
+        </div>
+
+        <!-- Titik 3 -->
+        <div class="row">
+            <label>Titik 3</label>
+            <input type="number" id="rpm3" value="9000" placeholder="9000">
+            <input type="number" id="deg3" value="34" placeholder="34">
+        </div>
+
+        <button class="btn-send" onclick="sendMapData()">KIRIM MAP KE CDI</button>
+    </div>
+
+    <script>
+        let bluetoothDevice;
+        let txCharacteristic;
+
+        // UUID standar untuk BLE ESP32 UART Service
+        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const CHARACTERISTIC_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+
+        async function connectBluetooth() {
+            try {
+                const statusDiv = document.getElementById('status');
+                statusDiv.innerText = "Mencari Perangkat...";
+
+                // Menampilkan dialog koneksi Bluetooth bawaan browser
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'CDI_PROGRAMMABLE_ESP32' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                statusDiv.innerText = "Menghubungkan...";
+
+                const server = await bluetoothDevice.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                txCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+                statusDiv.innerText = "Terhubung: " + bluetoothDevice.name;
+                statusDiv.className = "status-box connected";
+            } catch (error) {
+                console.error(error);
+                const statusDiv = document.getElementById('status');
+                statusDiv.innerText = "Gagal / Dibatalkan";
+                statusDiv.className = "status-box disconnected";
+            }
+        }
+
+        async function sendMapData() {
+            if (!txCharacteristic) {
+                alert("Silakan hubungkan Bluetooth ke CDI terlebih dahulu!");
+                return;
+            }
+
+            const r1 = document.getElementById('rpm1').value;
+            const d1 = document.getElementById('deg1').value;
+            const r2 = document.getElementById('rpm2').value;
+            const d2 = document.getElementById('deg2').value;
+            const r3 = document.getElementById('rpm3').value;
+            const d3 = document.getElementById('deg3').value;
+
+            // Format data string yang dikirim: MAP,2000:15,5000:25,9000:34#
+            const payload = `MAP,${r1}:${d1},${r2}:${d2},${r3}:${d3}#`;
+
+            try {
+                const encoder = new TextEncoder();
+                await txCharacteristic.writeValue(encoder.encode(payload));
+                alert("Data Map Pengapian Berhasil Dikirim ke CDI!");
+            } catch (error) {
+                console.error(error);
+                alert("Gagal mengirim data: " + error);
+            }
+        }
+    </script>
+</body>
+          </html>
+          
